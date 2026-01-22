@@ -7,58 +7,109 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
+// Base route
 app.get("/", (req, res) => {
   res.send("API is working");
 });
 
+// Connect to MongoDB
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB Connected"));
+  .then(() => console.log("MongoDB Connected"))
+  .catch(err => console.error("MongoDB connection error:", err));
 
+// User Schema
 const UserSchema = new mongoose.Schema({
-  email: String,
-  password: String
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true }
 });
 
 const User = mongoose.model("User", UserSchema);
 
-/* REGISTER */
+// REGISTER
 app.post("/api/auth/register", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const user = await User.create({ email, password: hashedPassword });
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ success: false, message: "User already exists" });
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+    // Hash password and create user
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await User.create({ email, password: hashedPassword });
 
-  res.json({
-    success: true,
-    user_id: user._id,
-    token
-  });
+    // Generate JWT token
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+    res.json({
+      success: true,
+      user_id: user._id,
+      token
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
-/* LOGIN */
+// LOGIN
 app.post("/api/auth/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const user = await User.findOne({ email });
-  if (!user) return res.status(401).json({ success: false });
+    // Find user
+    const user = await User.findOne({ email });
+    if (!user) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(401).json({ success: false });
+    // Compare password
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+    // Generate JWT token
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
 
-  res.json({
-    success: true,
-    token,
-    user: {
-      id: user._id,
-      email: user.email
-    }
-  });
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        email: user.email
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
-app.listen(3001, () => {
-  console.log("Server running on port 3001");
+// Example protected route
+const authMiddleware = (req, res, next) => {
+  const token = req.header("Authorization")?.replace("Bearer ", "");
+  if (!token) return res.status(401).json({ message: "No token provided" });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded; // attach user ID to request
+    next();
+  } catch (err) {
+    res.status(401).json({ message: "Invalid token" });
+  }
+};
+
+app.get("/api/auth/profile", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    res.json({ email: user.email });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Dynamic port for cloud deployment
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
