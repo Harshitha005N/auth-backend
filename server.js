@@ -2,9 +2,19 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const cors = require("cors");          // ✅ ADDED
 require("dotenv").config();
 
 const app = express();
+
+/* ✅ CORS FIX — MUST BE BEFORE ROUTES */
+app.use(cors({
+  origin: "*",   // allow all origins (safe for college/project)
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+app.options("*", cors()); // ✅ IMPORTANT for preflight
+
 app.use(express.json());
 
 // Base route
@@ -30,16 +40,18 @@ app.post("/api/auth/register", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ success: false, message: "User already exists" });
+    if (existingUser)
+      return res.status(400).json({ success: false, message: "User already exists" });
 
-    // Hash password and create user
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await User.create({ email, password: hashedPassword });
 
-    // Generate JWT token
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
 
     res.json({
       success: true,
@@ -57,16 +69,19 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user
     const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ success: false, message: "Invalid credentials" });
+    if (!user)
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-    // Compare password
     const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.status(401).json({ success: false, message: "Invalid credentials" });
+    if (!match)
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
 
-    // Generate JWT token
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
 
     res.json({
       success: true,
@@ -82,24 +97,27 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// Example protected route
+// Auth middleware
 const authMiddleware = (req, res, next) => {
   const token = req.header("Authorization")?.replace("Bearer ", "");
-  if (!token) return res.status(401).json({ message: "No token provided" });
+  if (!token)
+    return res.status(401).json({ message: "No token provided" });
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded; // attach user ID to request
+    req.user = decoded;
     next();
   } catch (err) {
     res.status(401).json({ message: "Invalid token" });
   }
 };
 
+// Protected route
 app.get("/api/auth/profile", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user)
+      return res.status(404).json({ message: "User not found" });
 
     res.json({ email: user.email });
   } catch (err) {
@@ -108,7 +126,7 @@ app.get("/api/auth/profile", authMiddleware, async (req, res) => {
   }
 });
 
-// Dynamic port for cloud deployment
+// Dynamic port
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
